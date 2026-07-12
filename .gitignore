@@ -1,0 +1,10 @@
+build/
+gbfs
+*.o
+*.d
+tests/build/
+
+.openvelo/implementer-notes.md
+
+# Temp dirs created by tests' mkdtemp(3) calls.
+gbfs-test-*/

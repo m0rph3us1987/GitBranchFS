@@ -1,0 +1,9 @@
+{
+  "name": "gbfs",
+  "version": "1.0.0",
+  "dependencies": [
+    "libgit2",
+    "jansson"
+  ],
+  "builtin-baseline": "97b19caab97ab0c8d36c93230046c8c45fcd41d0"
+}
