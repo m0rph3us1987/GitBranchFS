@@ -1,3 +1,13 @@
+/*
+ * GSSAPI stubs.
+ *
+ * These satisfy the GSSAPI symbols that a statically-linked libgit2 may
+ * reference on Unix without requiring the full krb5/gssapi libraries. They
+ * are not needed on Windows, where libgit2 uses WinHTTP/SSPI for auth and
+ * <gssapi.h> does not exist, so the whole file compiles to nothing there.
+ */
+#ifndef _WIN32
+
 #include <gssapi.h>
 
 gss_OID GSS_C_NT_HOSTBASED_SERVICE = (gss_OID)0;
@@ -72,3 +82,5 @@ OM_uint32 gss_release_oid_set(OM_uint32 *minor_status,
     (void)minor_status; (void)set;
     return 0;
 }
+
+#endif /* !_WIN32 */
