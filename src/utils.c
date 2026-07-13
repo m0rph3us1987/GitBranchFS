@@ -80,10 +80,12 @@ int sanitize_path(const char *base, const char *path,
         return -EINVAL;
     }
 
+    // An empty base represents the FUSE mount root (its relative path is the
+    // empty string). Joining it with a child name must yield an absolute-style
+    // path like "/name", so we allow it through: the collapsed relative path
+    // below already carries the leading '/', and the prefix check trivially
+    // holds for a zero-length base.
     size_t base_len = strlen(base);
-    if (base_len == 0) {
-        return -EINVAL;
-    }
 
     // Skip leading slashes from the FUSE-supplied path
     const char *p = path;
@@ -257,3 +259,4 @@ char *derive_mount_id(const char *mount_path) {
     free(base);
     return result;
 }
+
