@@ -317,9 +317,10 @@ exists it must be an empty directory, otherwise the mount fails.
   HEAD commit (a persistent side effect) and mounts it — commits land on the
   new branch, not the default branch. An empty repository with no commits has
   no base to branch from, so the mount fails in that case.
-- FUSE operations `symlink` / `readlink` / `access` / `flush` / `opendir` /
-  `releasedir` are not supported. `statfs` is implemented and reports the
-  overlay host volume's free space (required on Windows so WinFSP does not
+- Full suite of standard FUSE operations (`symlink`, `readlink`, `access`, `flush`,
+  `opendir`, `releasedir`, `fsync`, `fsyncdir`, `mknod`, `link`, `xattr`, `fallocate`,
+  `copy_file_range`, `flock`, `lseek`, `statfs`) are fully implemented and supported. `statfs`
+  reports the overlay host volume's free space (required on Windows so WinFSP does not
   surface "disk full" on every write).
 - Single-threaded FUSE (`-s` is passed to `fuse_main`); `make` on the host must
   have access to `libgit2-dev` ≥ 1.5 and `libfuse3-dev`.

@@ -327,7 +327,8 @@ int gbfs_rename_entry(gbfs_state_t *state, const char *src, const char *dst) {
         return -ENOMEM;
     }
 
-    int src_in_overlay = file_exists(local_src) || dir_exists(local_src);
+    gbfs_stat_t st_src;
+    int src_in_overlay = (lstat(local_src, &st_src) == 0);
     int src_in_git = 0;
     const char *git_src_path = src;
     while (*git_src_path == '/') git_src_path++;
@@ -432,7 +433,8 @@ int gbfs_unlink_file(gbfs_state_t *state, const char *path) {
     char *local_path = join_paths(state->overlay_path, path);
     if (local_path == NULL) return -ENOMEM;
 
-    int in_overlay = file_exists(local_path);
+    gbfs_stat_t st_local;
+    int in_overlay = (lstat(local_path, &st_local) == 0);
     int in_git = 0;
     
     const char *git_path = path;

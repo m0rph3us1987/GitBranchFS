@@ -8,7 +8,25 @@
  */
 #ifndef _WIN32
 
+#if __has_include(<gssapi.h>)
 #include <gssapi.h>
+#elif __has_include(<gssapi/gssapi.h>)
+#include <gssapi/gssapi.h>
+#else
+#include <stdint.h>
+#include <stddef.h>
+typedef uint32_t OM_uint32;
+typedef void *gss_OID;
+typedef void *gss_name_t;
+typedef void *gss_cred_id_t;
+typedef void *gss_ctx_id_t;
+typedef void *gss_OID_set;
+typedef void *gss_channel_bindings_t;
+typedef struct gss_buffer_desc_struct {
+    size_t length;
+    void *value;
+} gss_buffer_desc, *gss_buffer_t;
+#endif
 
 gss_OID GSS_C_NT_HOSTBASED_SERVICE = (gss_OID)0;
 

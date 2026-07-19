@@ -294,6 +294,42 @@ static inline ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
 #define chmod(path, mode) _chmod(path, mode)
 #define lchown(path, uid, gid) (0)
 
+static inline ssize_t win32_readlink(const char *path, char *buf, size_t bufsiz) {
+    HANDLE h = CreateFileA(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        errno = ENOENT;
+        return -1;
+    }
+    char target[MAX_PATH];
+    DWORD ret = GetFinalPathNameByHandleA(h, target, sizeof(target), VOLUME_NAME_DOS);
+    CloseHandle(h);
+    if (ret == 0 || ret >= sizeof(target)) {
+        errno = EIO;
+        return -1;
+    }
+    const char *p = target;
+    if (strncmp(p, "\\\\?\\", 4) == 0) p += 4;
+    size_t len = strlen(p);
+    if (len > bufsiz) len = bufsiz;
+    memcpy(buf, p, len);
+    return (ssize_t)len;
+}
+#define readlink(path, buf, bufsiz) win32_readlink(path, buf, bufsiz)
+
+static inline int win32_symlink(const char *target, const char *linkpath) {
+    DWORD flags = 0x2; // SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE
+    if (CreateSymbolicLinkA(linkpath, target, flags)) {
+        return 0;
+    }
+    if (CreateSymbolicLinkA(linkpath, target, 0)) {
+        return 0;
+    }
+    errno = EPERM;
+    return -1;
+}
+#define symlink(target, linkpath) win32_symlink(target, linkpath)
+
 // statvfs compatibility. WinFSP-FUSE3 uses this to answer Windows'
 // FileFsSizeInformation queries; without it WinFSP reports zero free bytes
 // and every write fails with ERROR_DISK_FULL. The host volume queried here
@@ -371,6 +407,8 @@ static inline int win32_rename(const char *src, const char *dst) {
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
+#include <sys/xattr.h>
+#include <sys/file.h>
 #include <unistd.h>
 #include <time.h>
 #include <dirent.h>

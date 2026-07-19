@@ -33,5 +33,21 @@ int gbfs_rename_entry(gbfs_state_t *state, const char *src_path, const char *dst
 int gbfs_utimens_file(gbfs_state_t *state, const char *path, const gbfs_timespec_t ts[2]);
 int gbfs_chmod_file(gbfs_state_t *state, const char *path, mode_t mode);
 int gbfs_chown_file(gbfs_state_t *state, const char *path, uid_t uid, gid_t gid);
+int gbfs_read_link(gbfs_state_t *state, const char *path, char *buf, size_t size);
+int gbfs_make_symlink(gbfs_state_t *state, const char *target, const char *linkpath);
+
+// Extended File & FUSE Operations
+int gbfs_access_file(gbfs_state_t *state, const char *path, int mask);
+int gbfs_fsync_file(gbfs_state_t *state, void *fh, int datasync);
+int gbfs_mknod_file(gbfs_state_t *state, const char *path, mode_t mode, dev_t rdev);
+int gbfs_link_file(gbfs_state_t *state, const char *oldpath, const char *newpath);
+int gbfs_get_xattr(gbfs_state_t *state, const char *path, const char *name, char *value, size_t size);
+int gbfs_set_xattr(gbfs_state_t *state, const char *path, const char *name, const char *value, size_t size, int flags);
+int gbfs_list_xattr(gbfs_state_t *state, const char *path, char *list, size_t size);
+int gbfs_remove_xattr(gbfs_state_t *state, const char *path, const char *name);
+int gbfs_fallocate_file(gbfs_state_t *state, void *fh, int mode, int64_t offset, int64_t len);
+int gbfs_copy_file_range(gbfs_state_t *state, void *fh_in, int64_t off_in, void *fh_out, int64_t off_out, size_t len, unsigned int flags);
+int gbfs_flock_file(gbfs_state_t *state, void *fh, int op);
+int gbfs_lseek_file(gbfs_state_t *state, void *fh, int64_t off, int whence, int64_t *out_off);
 
 #endif // CORE_FS_H

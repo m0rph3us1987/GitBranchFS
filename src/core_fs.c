@@ -470,3 +470,363 @@ int gbfs_chown_file(gbfs_state_t *state, const char *path, uid_t uid, gid_t gid)
     if (ret < 0) return -errno;
     return 0;
 }
+
+int gbfs_read_link(gbfs_state_t *state, const char *path, char *buf, size_t size) {
+    if (state == NULL || path == NULL || buf == NULL || size == 0) return -EINVAL;
+    if (overlay_is_deleted(state->deleted, path)) return -ENOENT;
+
+    char *local_path = join_paths(state->overlay_path, path);
+    if (local_path == NULL) return -ENOMEM;
+
+    gbfs_stat_t st;
+    if (lstat(local_path, &st) == 0) {
+        if (!S_ISLNK(st.st_mode)) {
+            free(local_path);
+            return -EINVAL;
+        }
+        ssize_t ret = readlink(local_path, buf, size - 1);
+        free(local_path);
+        if (ret < 0) return -errno;
+        buf[ret] = '\0';
+        return 0;
+    }
+    free(local_path);
+
+    if (git_wrapper_stat(state->repo, state->tree, path, &st, state->default_time) < 0) {
+        return -ENOENT;
+    }
+    if (!S_ISLNK(st.st_mode)) {
+        return -EINVAL;
+    }
+
+    git_blob *blob = NULL;
+    int err = git_wrapper_get_blob(state->repo, state->tree, path, &blob);
+    if (err < 0) return -ENOENT;
+
+    const char *content = git_blob_rawcontent(blob);
+    size_t blob_size = (size_t)git_blob_rawsize(blob);
+
+    size_t to_copy = (blob_size < size - 1) ? blob_size : (size - 1);
+    memcpy(buf, content, to_copy);
+    buf[to_copy] = '\0';
+
+    git_blob_free(blob);
+    return 0;
+}
+
+int gbfs_make_symlink(gbfs_state_t *state, const char *target, const char *linkpath) {
+    if (state == NULL || target == NULL || linkpath == NULL) return -EINVAL;
+
+    gbfs_stat_t st;
+    if (gbfs_get_attr(state, linkpath, &st) == 0) {
+        return -EEXIST;
+    }
+
+    overlay_unmark_deleted(state->overlay_path, state->deleted, linkpath);
+
+    char *local_path = join_paths(state->overlay_path, linkpath);
+    if (local_path == NULL) return -ENOMEM;
+
+    char *last_slash = strrchr(local_path, '/');
+    if (last_slash != NULL && last_slash != local_path) {
+        *last_slash = '\0';
+        mkdir_rec(local_path);
+        *last_slash = '/';
+    }
+
+    int res = symlink(target, local_path);
+    free(local_path);
+    if (res < 0) return -errno;
+    return 0;
+}
+
+int gbfs_access_file(gbfs_state_t *state, const char *path, int mask) {
+    if (state == NULL || path == NULL) return -EINVAL;
+    if (overlay_is_deleted(state->deleted, path)) return -ENOENT;
+
+    char *local_path = join_paths(state->overlay_path, path);
+    if (local_path == NULL) return -ENOMEM;
+
+    gbfs_stat_t st;
+    if (lstat(local_path, &st) == 0) {
+        int res = access(local_path, mask);
+        free(local_path);
+        if (res < 0) return -errno;
+        return 0;
+    }
+    free(local_path);
+
+    if (git_wrapper_stat(state->repo, state->tree, path, &st, state->default_time) < 0) {
+        return -ENOENT;
+    }
+    return 0;
+}
+
+int gbfs_fsync_file(gbfs_state_t *state, void *fh, int datasync) {
+    (void)state;
+    gbfs_file_handle_t *handle = (gbfs_file_handle_t *)fh;
+    if (handle == NULL) return 0;
+    if (handle->is_overlay && handle->fd >= 0) {
+#ifdef _WIN32
+        (void)datasync;
+        FlushFileBuffers((HANDLE)_get_osfhandle(handle->fd));
+#else
+        int res = datasync ? fdatasync(handle->fd) : fsync(handle->fd);
+        if (res < 0) return -errno;
+#endif
+    }
+    return 0;
+}
+
+int gbfs_mknod_file(gbfs_state_t *state, const char *path, mode_t mode, dev_t rdev) {
+    if (state == NULL || path == NULL) return -EINVAL;
+
+    if (S_ISREG(mode)) {
+        void *fh = NULL;
+        int res = gbfs_create_file(state, path, mode, &fh);
+        if (res == 0) gbfs_close_file(state, fh);
+        return res;
+    }
+
+    overlay_unmark_deleted(state->overlay_path, state->deleted, path);
+
+    char *local_path = join_paths(state->overlay_path, path);
+    if (local_path == NULL) return -ENOMEM;
+
+    char *last_slash = strrchr(local_path, '/');
+    if (last_slash != NULL && last_slash != local_path) {
+        *last_slash = '\0';
+        mkdir_rec(local_path);
+        *last_slash = '/';
+    }
+
+#ifdef _WIN32
+    (void)mode; (void)rdev; free(local_path); return -ENOSYS;
+#else
+    int res = mknod(local_path, mode, rdev);
+    free(local_path);
+    if (res < 0) return -errno;
+    return 0;
+#endif
+}
+
+int gbfs_link_file(gbfs_state_t *state, const char *oldpath, const char *newpath) {
+    if (state == NULL || oldpath == NULL || newpath == NULL) return -EINVAL;
+
+    gbfs_stat_t st;
+    if (gbfs_get_attr(state, oldpath, &st) < 0) return -ENOENT;
+    if (gbfs_get_attr(state, newpath, &st) == 0) return -EEXIST;
+
+    char *local_old = join_paths(state->overlay_path, oldpath);
+    if (local_old == NULL) return -ENOMEM;
+
+    if (!file_exists(local_old) && !dir_exists(local_old)) {
+        git_blob *blob = NULL;
+        if (git_wrapper_get_blob(state->repo, state->tree, oldpath, &blob) == 0) {
+            git_wrapper_stat(state->repo, state->tree, oldpath, &st, state->default_time);
+            overlay_write_blob(state->overlay_path, oldpath, blob, st.st_mode);
+            git_blob_free(blob);
+        }
+    }
+
+    overlay_unmark_deleted(state->overlay_path, state->deleted, newpath);
+
+    char *local_new = join_paths(state->overlay_path, newpath);
+    if (local_new == NULL) {
+        free(local_old);
+        return -ENOMEM;
+    }
+
+    char *last_slash = strrchr(local_new, '/');
+    if (last_slash != NULL && last_slash != local_new) {
+        *last_slash = '\0';
+        mkdir_rec(local_new);
+        *last_slash = '/';
+    }
+
+#ifdef _WIN32
+    int res = CreateHardLinkA(local_new, local_old, NULL) ? 0 : -1;
+#else
+    int res = link(local_old, local_new);
+#endif
+    free(local_old);
+    free(local_new);
+    if (res < 0) return -errno;
+    return 0;
+}
+
+int gbfs_get_xattr(gbfs_state_t *state, const char *path, const char *name, char *value, size_t size) {
+    (void)name; (void)value; (void)size;
+    if (state == NULL || path == NULL) return -EINVAL;
+    if (overlay_is_deleted(state->deleted, path)) return -ENOENT;
+
+#ifndef _WIN32
+    char *local_path = join_paths(state->overlay_path, path);
+    if (local_path == NULL) return -ENOMEM;
+
+    gbfs_stat_t st;
+    if (lstat(local_path, &st) == 0) {
+        ssize_t ret = lgetxattr(local_path, name, value, size);
+        free(local_path);
+        if (ret < 0) return -errno;
+        return (int)ret;
+    }
+    free(local_path);
+#endif
+    return -ENODATA;
+}
+
+int gbfs_set_xattr(gbfs_state_t *state, const char *path, const char *name, const char *value, size_t size, int flags) {
+    (void)name; (void)value; (void)size; (void)flags;
+    if (state == NULL || path == NULL) return -EINVAL;
+    if (overlay_is_deleted(state->deleted, path)) return -ENOENT;
+
+#ifndef _WIN32
+    char *local_path = join_paths(state->overlay_path, path);
+    if (local_path == NULL) return -ENOMEM;
+
+    if (!file_exists(local_path) && !dir_exists(local_path)) {
+        git_blob *blob = NULL;
+        if (git_wrapper_get_blob(state->repo, state->tree, path, &blob) == 0) {
+            gbfs_stat_t st;
+            git_wrapper_stat(state->repo, state->tree, path, &st, state->default_time);
+            overlay_write_blob(state->overlay_path, path, blob, st.st_mode);
+            git_blob_free(blob);
+        }
+    }
+
+    int ret = lsetxattr(local_path, name, value, size, flags);
+    free(local_path);
+    if (ret < 0) return -errno;
+    return 0;
+#else
+    return -ENOTSUP;
+#endif
+}
+
+int gbfs_list_xattr(gbfs_state_t *state, const char *path, char *list, size_t size) {
+    (void)list; (void)size;
+    if (state == NULL || path == NULL) return -EINVAL;
+    if (overlay_is_deleted(state->deleted, path)) return -ENOENT;
+
+#ifndef _WIN32
+    char *local_path = join_paths(state->overlay_path, path);
+    if (local_path == NULL) return -ENOMEM;
+
+    gbfs_stat_t st;
+    if (lstat(local_path, &st) == 0) {
+        ssize_t ret = llistxattr(local_path, list, size);
+        free(local_path);
+        if (ret < 0) return -errno;
+        return (int)ret;
+    }
+    free(local_path);
+#endif
+    return 0;
+}
+
+int gbfs_remove_xattr(gbfs_state_t *state, const char *path, const char *name) {
+    (void)name;
+    if (state == NULL || path == NULL) return -EINVAL;
+    if (overlay_is_deleted(state->deleted, path)) return -ENOENT;
+
+#ifndef _WIN32
+    char *local_path = join_paths(state->overlay_path, path);
+    if (local_path == NULL) return -ENOMEM;
+
+    gbfs_stat_t st;
+    if (lstat(local_path, &st) == 0) {
+        int ret = lremovexattr(local_path, name);
+        free(local_path);
+        if (ret < 0) return -errno;
+        return 0;
+    }
+    free(local_path);
+#endif
+    return -ENODATA;
+}
+
+int gbfs_fallocate_file(gbfs_state_t *state, void *fh, int mode, int64_t offset, int64_t len) {
+    (void)state;
+    gbfs_file_handle_t *handle = (gbfs_file_handle_t *)fh;
+    if (handle == NULL || !handle->is_overlay || handle->fd < 0) return -EBADF;
+
+#if defined(__linux__) && defined(_GNU_SOURCE)
+    int res = fallocate(handle->fd, mode, (off_t)offset, (off_t)len);
+    if (res < 0) return -errno;
+    return 0;
+#else
+    (void)mode; (void)offset; (void)len;
+    return -ENOSYS;
+#endif
+}
+
+int gbfs_copy_file_range(gbfs_state_t *state, void *fh_in, int64_t off_in, void *fh_out, int64_t off_out, size_t len, unsigned int flags) {
+    (void)state;
+    gbfs_file_handle_t *in = (gbfs_file_handle_t *)fh_in;
+    gbfs_file_handle_t *out = (gbfs_file_handle_t *)fh_out;
+    if (in == NULL || out == NULL) return -EBADF;
+
+#if defined(__linux__) && defined(_GNU_SOURCE)
+    if (in->is_overlay && out->is_overlay && in->fd >= 0 && out->fd >= 0) {
+        off_t i = (off_t)off_in;
+        off_t o = (off_t)off_out;
+        ssize_t ret = copy_file_range(in->fd, &i, out->fd, &o, len, flags);
+        if (ret < 0) return -errno;
+        return (int)ret;
+    }
+#else
+    (void)off_in; (void)off_out; (void)len; (void)flags;
+#endif
+    return -EXDEV;
+}
+
+int gbfs_flock_file(gbfs_state_t *state, void *fh, int op) {
+    (void)state;
+    gbfs_file_handle_t *handle = (gbfs_file_handle_t *)fh;
+    if (handle == NULL) return -EBADF;
+#ifndef _WIN32
+    if (handle->is_overlay && handle->fd >= 0) {
+        int res = flock(handle->fd, op);
+        if (res < 0) return -errno;
+    }
+#else
+    (void)op;
+#endif
+    return 0;
+}
+
+int gbfs_lseek_file(gbfs_state_t *state, void *fh, int64_t off, int whence, int64_t *out_off) {
+    (void)state;
+    gbfs_file_handle_t *handle = (gbfs_file_handle_t *)fh;
+    if (handle == NULL) return -EBADF;
+
+    if (handle->is_overlay && handle->fd >= 0) {
+        off_t res = lseek(handle->fd, (off_t)off, whence);
+        if (res == (off_t)-1) return -errno;
+        if (out_off != NULL) *out_off = (int64_t)res;
+        return 0;
+    }
+
+    size_t size = 0;
+    if (handle->virtual_data != NULL) size = handle->virtual_size;
+    else if (handle->blob != NULL) size = (size_t)git_blob_rawsize(handle->blob);
+
+    int64_t new_off = 0;
+    if (whence == SEEK_SET) {
+        new_off = off;
+    } else if (whence == SEEK_CUR || whence == SEEK_END) {
+        new_off = (int64_t)size + off;
+    } else if (whence == 3 /* SEEK_DATA */) {
+        if ((uint64_t)off >= size) return -ENXIO;
+        new_off = off;
+    } else if (whence == 4 /* SEEK_HOLE */) {
+        new_off = (int64_t)size;
+    } else {
+        return -EINVAL;
+    }
+
+    if (new_off < 0) return -EINVAL;
+    if (out_off != NULL) *out_off = new_off;
+    return 0;
+}

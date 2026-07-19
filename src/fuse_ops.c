@@ -81,6 +81,22 @@ static int gbfs_fuse_getattr(const char *path, gbfs_stat_t *st, struct fuse_file
     return gbfs_get_attr(state, clean, st);
 }
 
+static int gbfs_fuse_readlink(const char *path, char *buf, size_t size) {
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    char clean[PATH_MAX];
+    int err = sanitize_fuse_path(path, clean, sizeof(clean));
+    if (err < 0) return err;
+    return gbfs_read_link(state, clean, buf, size);
+}
+
+static int gbfs_fuse_symlink(const char *target, const char *linkpath) {
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    char clean_linkpath[PATH_MAX];
+    int err = sanitize_fuse_path(linkpath, clean_linkpath, sizeof(clean_linkpath));
+    if (err < 0) return err;
+    return gbfs_make_symlink(state, target, clean_linkpath);
+}
+
 static int gbfs_fuse_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                              gbfs_off_t offset, struct fuse_file_info *fi,
                              enum fuse_readdir_flags flags) {
@@ -262,23 +278,174 @@ static int gbfs_fuse_statfs(const char *path, gbfs_statvfs_t *st) {
     return 0;
 }
 
+static int gbfs_fuse_access(const char *path, int mask) {
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    char clean[PATH_MAX];
+    int err = sanitize_fuse_path(path, clean, sizeof(clean));
+    if (err < 0) return err;
+    return gbfs_access_file(state, clean, mask);
+}
+
+static int gbfs_fuse_flush(const char *path, struct fuse_file_info *fi) {
+    (void)path;
+    (void)fi;
+    return 0;
+}
+
+static int gbfs_fuse_fsync(const char *path, int datasync, struct fuse_file_info *fi) {
+    (void)path;
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    void *fh = (void *)(uintptr_t)fi->fh;
+    return gbfs_fsync_file(state, fh, datasync);
+}
+
+static int gbfs_fuse_opendir(const char *path, struct fuse_file_info *fi) {
+    (void)fi;
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    char clean[PATH_MAX];
+    int err = sanitize_fuse_path(path, clean, sizeof(clean));
+    if (err < 0) return err;
+    gbfs_stat_t st;
+    err = gbfs_get_attr(state, clean, &st);
+    if (err < 0) return err;
+    if (!S_ISDIR(st.st_mode)) return -ENOTDIR;
+    return 0;
+}
+
+static int gbfs_fuse_releasedir(const char *path, struct fuse_file_info *fi) {
+    (void)path;
+    (void)fi;
+    return 0;
+}
+
+static int gbfs_fuse_fsyncdir(const char *path, int datasync, struct fuse_file_info *fi) {
+    (void)path;
+    (void)datasync;
+    (void)fi;
+    return 0;
+}
+
+static int gbfs_fuse_mknod(const char *path, gbfs_mode_t mode, dev_t rdev) {
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    char clean[PATH_MAX];
+    int err = sanitize_fuse_path(path, clean, sizeof(clean));
+    if (err < 0) return err;
+    return gbfs_mknod_file(state, clean, mode, rdev);
+}
+
+static int gbfs_fuse_link(const char *oldpath, const char *newpath) {
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    char clean_old[PATH_MAX];
+    char clean_new[PATH_MAX];
+    int err = sanitize_fuse_path(oldpath, clean_old, sizeof(clean_old));
+    if (err < 0) return err;
+    err = sanitize_fuse_path(newpath, clean_new, sizeof(clean_new));
+    if (err < 0) return err;
+    return gbfs_link_file(state, clean_old, clean_new);
+}
+
+static int gbfs_fuse_getxattr(const char *path, const char *name, char *value, size_t size) {
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    char clean[PATH_MAX];
+    int err = sanitize_fuse_path(path, clean, sizeof(clean));
+    if (err < 0) return err;
+    return gbfs_get_xattr(state, clean, name, value, size);
+}
+
+static int gbfs_fuse_setxattr(const char *path, const char *name, const char *value, size_t size, int flags) {
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    char clean[PATH_MAX];
+    int err = sanitize_fuse_path(path, clean, sizeof(clean));
+    if (err < 0) return err;
+    return gbfs_set_xattr(state, clean, name, value, size, flags);
+}
+
+static int gbfs_fuse_listxattr(const char *path, char *list, size_t size) {
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    char clean[PATH_MAX];
+    int err = sanitize_fuse_path(path, clean, sizeof(clean));
+    if (err < 0) return err;
+    return gbfs_list_xattr(state, clean, list, size);
+}
+
+static int gbfs_fuse_removexattr(const char *path, const char *name) {
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    char clean[PATH_MAX];
+    int err = sanitize_fuse_path(path, clean, sizeof(clean));
+    if (err < 0) return err;
+    return gbfs_remove_xattr(state, clean, name);
+}
+
+static int gbfs_fuse_fallocate(const char *path, int mode, gbfs_off_t offset, gbfs_off_t len, struct fuse_file_info *fi) {
+    (void)path;
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    void *fh = (void *)(uintptr_t)fi->fh;
+    return gbfs_fallocate_file(state, fh, mode, (int64_t)offset, (int64_t)len);
+}
+
+static ssize_t gbfs_fuse_copy_file_range(const char *path_in, struct fuse_file_info *fi_in, gbfs_off_t off_in,
+                                          const char *path_out, struct fuse_file_info *fi_out, gbfs_off_t off_out,
+                                          size_t len, int flags) {
+    (void)path_in;
+    (void)path_out;
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    void *fh_in = (void *)(uintptr_t)fi_in->fh;
+    void *fh_out = (void *)(uintptr_t)fi_out->fh;
+    return (ssize_t)gbfs_copy_file_range(state, fh_in, (int64_t)off_in, fh_out, (int64_t)off_out, len, (unsigned int)flags);
+}
+
+static int gbfs_fuse_flock(const char *path, struct fuse_file_info *fi, int op) {
+    (void)path;
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    void *fh = (void *)(uintptr_t)fi->fh;
+    return gbfs_flock_file(state, fh, op);
+}
+
+static gbfs_off_t gbfs_fuse_lseek(const char *path, gbfs_off_t off, int whence, struct fuse_file_info *fi) {
+    (void)path;
+    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
+    void *fh = (void *)(uintptr_t)fi->fh;
+    int64_t out_off = 0;
+    int err = gbfs_lseek_file(state, fh, (int64_t)off, whence, &out_off);
+    if (err < 0) return (gbfs_off_t)err;
+    return (gbfs_off_t)out_off;
+}
+
 static const struct fuse_operations gbfs_oper = {
-    .getattr    = gbfs_fuse_getattr,
-    .readdir    = gbfs_fuse_readdir,
-    .open       = gbfs_fuse_open,
-    .read       = gbfs_fuse_read,
-    .write      = gbfs_fuse_write,
-    .release    = gbfs_fuse_release,
-    .create     = gbfs_fuse_create,
-    .unlink     = gbfs_fuse_unlink,
-    .mkdir      = gbfs_fuse_mkdir,
-    .rmdir      = gbfs_fuse_rmdir,
-    .rename     = gbfs_fuse_rename,
-    .truncate   = gbfs_fuse_truncate,
-    .utimens    = gbfs_fuse_utimens,
-    .chmod      = gbfs_fuse_chmod,
-    .chown      = gbfs_fuse_chown,
-    .statfs     = gbfs_fuse_statfs,
+    .getattr         = gbfs_fuse_getattr,
+    .readlink        = gbfs_fuse_readlink,
+    .mknod           = gbfs_fuse_mknod,
+    .mkdir           = gbfs_fuse_mkdir,
+    .unlink          = gbfs_fuse_unlink,
+    .rmdir           = gbfs_fuse_rmdir,
+    .symlink         = gbfs_fuse_symlink,
+    .rename          = gbfs_fuse_rename,
+    .link            = gbfs_fuse_link,
+    .chmod           = gbfs_fuse_chmod,
+    .chown           = gbfs_fuse_chown,
+    .truncate        = gbfs_fuse_truncate,
+    .open            = gbfs_fuse_open,
+    .read            = gbfs_fuse_read,
+    .write           = gbfs_fuse_write,
+    .statfs          = gbfs_fuse_statfs,
+    .flush           = gbfs_fuse_flush,
+    .release         = gbfs_fuse_release,
+    .fsync           = gbfs_fuse_fsync,
+    .setxattr        = gbfs_fuse_setxattr,
+    .getxattr        = gbfs_fuse_getxattr,
+    .listxattr       = gbfs_fuse_listxattr,
+    .removexattr     = gbfs_fuse_removexattr,
+    .opendir         = gbfs_fuse_opendir,
+    .readdir         = gbfs_fuse_readdir,
+    .releasedir      = gbfs_fuse_releasedir,
+    .fsyncdir        = gbfs_fuse_fsyncdir,
+    .access          = gbfs_fuse_access,
+    .create          = gbfs_fuse_create,
+    .utimens         = gbfs_fuse_utimens,
+    .fallocate       = gbfs_fuse_fallocate,
+    .copy_file_range = gbfs_fuse_copy_file_range,
+    .lseek           = gbfs_fuse_lseek,
+    .flock           = gbfs_fuse_flock,
 };
 
 int run_fuse_fs(int argc, char *argv[], gbfs_state_t *state) {
