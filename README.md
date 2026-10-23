@@ -319,9 +319,14 @@ exists it must be an empty directory, otherwise the mount fails.
   no base to branch from, so the mount fails in that case.
 - Full suite of standard FUSE operations (`symlink`, `readlink`, `access`, `flush`,
   `opendir`, `releasedir`, `fsync`, `fsyncdir`, `mknod`, `link`, `xattr`, `fallocate`,
-  `copy_file_range`, `flock`, `lseek`, `statfs`) are fully implemented and supported. `statfs`
+  `copy_file_range`, `lseek`, `statfs`) are fully implemented and supported. `statfs`
   reports the overlay host volume's free space (required on Windows so WinFSP does not
   surface "disk full" on every write).
+- `flock` is not forwarded to the overlay: the kernel handles it locally on the
+  mount, so locks are shared by all processes on the same machine that use the
+  mount (e.g. two `cargo build` runs on one `target/`) but not with processes that
+  open the overlay files directly. Forwarding it would block the single FUSE thread
+  while another process holds the lock and hang the whole mount.
 - Single-threaded FUSE (`-s` is passed to `fuse_main`); `make` on the host must
   have access to `libgit2-dev` ≥ 1.5 and `libfuse3-dev`.
 

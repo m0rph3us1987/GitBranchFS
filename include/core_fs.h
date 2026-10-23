@@ -47,7 +47,6 @@ int gbfs_list_xattr(gbfs_state_t *state, const char *path, char *list, size_t si
 int gbfs_remove_xattr(gbfs_state_t *state, const char *path, const char *name);
 int gbfs_fallocate_file(gbfs_state_t *state, void *fh, int mode, int64_t offset, int64_t len);
 int gbfs_copy_file_range(gbfs_state_t *state, void *fh_in, int64_t off_in, void *fh_out, int64_t off_out, size_t len, unsigned int flags);
-int gbfs_flock_file(gbfs_state_t *state, void *fh, int op);
 int gbfs_lseek_file(gbfs_state_t *state, void *fh, int64_t off, int whence, int64_t *out_off);
 
 #endif // CORE_FS_H

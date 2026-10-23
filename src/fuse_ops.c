@@ -394,13 +394,6 @@ static ssize_t gbfs_fuse_copy_file_range(const char *path_in, struct fuse_file_i
     return (ssize_t)gbfs_copy_file_range(state, fh_in, (int64_t)off_in, fh_out, (int64_t)off_out, len, (unsigned int)flags);
 }
 
-static int gbfs_fuse_flock(const char *path, struct fuse_file_info *fi, int op) {
-    (void)path;
-    gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
-    void *fh = (void *)(uintptr_t)fi->fh;
-    return gbfs_flock_file(state, fh, op);
-}
-
 static gbfs_off_t gbfs_fuse_lseek(const char *path, gbfs_off_t off, int whence, struct fuse_file_info *fi) {
     (void)path;
     gbfs_state_t *state = (gbfs_state_t *)fuse_get_context()->private_data;
@@ -445,7 +438,10 @@ static const struct fuse_operations gbfs_oper = {
     .fallocate       = gbfs_fuse_fallocate,
     .copy_file_range = gbfs_fuse_copy_file_range,
     .lseek           = gbfs_fuse_lseek,
-    .flock           = gbfs_fuse_flock,
+    /* No .flock: without it libfuse does not negotiate FUSE_CAP_FLOCK_LOCKS
+     * and the kernel handles flock() locally on the mount. Forwarding it made
+     * the single FUSE thread block in flock() while another process held the
+     * lock, which hung every request on the mount (including the unlock). */
 };
 
 int run_fuse_fs(int argc, char *argv[], gbfs_state_t *state) {

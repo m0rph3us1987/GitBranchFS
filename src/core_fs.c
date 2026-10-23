@@ -781,21 +781,6 @@ int gbfs_copy_file_range(gbfs_state_t *state, void *fh_in, int64_t off_in, void 
     return -EXDEV;
 }
 
-int gbfs_flock_file(gbfs_state_t *state, void *fh, int op) {
-    (void)state;
-    gbfs_file_handle_t *handle = (gbfs_file_handle_t *)fh;
-    if (handle == NULL) return -EBADF;
-#ifndef _WIN32
-    if (handle->is_overlay && handle->fd >= 0) {
-        int res = flock(handle->fd, op);
-        if (res < 0) return -errno;
-    }
-#else
-    (void)op;
-#endif
-    return 0;
-}
-
 int gbfs_lseek_file(gbfs_state_t *state, void *fh, int64_t off, int whence, int64_t *out_off) {
     (void)state;
     gbfs_file_handle_t *handle = (gbfs_file_handle_t *)fh;
